@@ -38,6 +38,29 @@ STATUS_BODY = (
     "if not (core.in_quiet_hours(state, local) or core.is_off_day(state, local)):\n"
     "    print(core.status_text(state))"
 )
+CHECKIN_BODY = (
+    "m = core.checkin_message(state, {dept!r})\n"
+    "print(f\"Thanks {{m['department']}} — this week's update is already in. 🙏\" if m['already_reported'] "
+    "else m['message'])"
+)
+# English founder pack without an LLM: pack text + a voice brief made with Hermes's own TTS,
+# attached as a WhatsApp/Telegram voice note via the scheduler's MEDIA tag.
+PACK_BODY = (
+    "pack = core.build_pack(state, None, 'founder')\n"
+    "out = pack['text'] + '\\n\\nReply *send* to post the staff version to everyone, or tell me what to change.'\n"
+    "try:\n"
+    "    import json, sys\n"
+    "    sys.path.insert(0, {hermes_root!r})\n"
+    "    import hermes_bootstrap  # noqa: F401  (Hermes's own dependency setup)\n"
+    "    from tools.tts_tool import text_to_speech_tool\n"
+    "    r = json.loads(text_to_speech_tool(pack['voice_script']))\n"
+    "    path = r.get('file_path') or r.get('path') or (r.get('files') or [None])[0]\n"
+    "    if path:\n"
+    "        out += '\\n[[audio_as_voice]]\\nMEDIA:' + str(path)\n"
+    "except Exception as e:\n"
+    "    out += '\\n(voice brief unavailable: ' + type(e).__name__ + ')'\n"
+    "print(out)"
+)
 PUBLISH_BODY = (
     "key = {week!r}\n"
     "bucket = state.get('weeks', {{}}).get(key, {{}})\n"
@@ -57,6 +80,18 @@ def write_script(scripts_dir: Path, name: str, state_path: Path, body: str) -> s
                                  state_path=str(state_path), body=body)
     (scripts_dir / name).write_text(src, encoding="utf-8")
     return name  # relative: Hermes resolves it under HERMES_HOME/scripts/
+
+
+def _hermes_root() -> str:
+    try:
+        import tools  # Hermes's package; absent in plain unit tests
+        return str(Path(tools.__file__).resolve().parent.parent)
+    except Exception:
+        return ""
+
+
+def _english(lang: str) -> bool:
+    return core.is_english(lang or "")
 
 
 def checkin_prompt(state: dict, dept: dict) -> str:
@@ -91,12 +126,17 @@ def plan_jobs(state: dict, state_path: Path, scripts_dir: Path) -> List[dict]:
     for d in state["departments"]:
         if not d.get("target"):
             continue
-        jobs.append({"key": f"checkin:{d['id']}", "args": {
-            "action": "create", "name": f"Steward check-in · {d['name']}",
-            "schedule": core.cron_expr(s["checkin_day"], s["checkin_time"]), "timezone": zone,
-            "prompt": checkin_prompt(state, d), "deliver": d["target"],
-            "attach_to_session": True, "skills": ["steward:checkin"],
-            "failure_deliver": quiet_fail, "catch_up": True}})
+        checkin = {"action": "create", "name": f"Steward check-in · {d['name']}",
+                   "schedule": core.cron_expr(s["checkin_day"], s["checkin_time"]), "timezone": zone,
+                   "deliver": d["target"], "attach_to_session": True,
+                   "failure_deliver": quiet_fail, "catch_up": True}
+        if _english(d.get("language")):
+            # same text every week: no LLM, nothing to get wrong, zero tokens
+            checkin.update(no_agent=True, script=write_script(
+                scripts_dir, script_name("checkin", d["id"]), state_path, CHECKIN_BODY.format(dept=d["id"])))
+        else:
+            checkin.update(prompt=checkin_prompt(state, d), skills=["steward:checkin"])
+        jobs.append({"key": f"checkin:{d['id']}", "args": checkin})
         name = write_script(scripts_dir, script_name("nudge", d["id"]), state_path,
                             NUDGE_BODY.format(dept=d["id"]))
         jobs.append({"key": f"nudge:{d['id']}", "args": {
@@ -110,11 +150,15 @@ def plan_jobs(state: dict, state_path: Path, scripts_dir: Path) -> List[dict]:
             "action": "create", "name": "Steward status · founder",
             "schedule": core.cron_expr(s["status_day"], s["status_time"]), "timezone": zone,
             "script": name, "no_agent": True, "deliver": state["founder_target"]}})
-        jobs.append({"key": "pack", "args": {
-            "action": "create", "name": "Steward weekly pack · founder",
-            "schedule": core.cron_expr(s["pack_day"], s["pack_time"]), "timezone": zone,
-            "prompt": pack_prompt(state), "deliver": state["founder_target"],
-            "attach_to_session": True, "skills": ["steward:weekly-pack"]}})
+        pack = {"action": "create", "name": "Steward weekly pack · founder",
+                "schedule": core.cron_expr(s["pack_day"], s["pack_time"]), "timezone": zone,
+                "deliver": state["founder_target"], "attach_to_session": True}
+        if not core.language_for(state, "founder"):
+            pack.update(no_agent=True, script=write_script(
+                scripts_dir, script_name("pack"), state_path, PACK_BODY.format(hermes_root=_hermes_root())))
+        else:
+            pack.update(prompt=pack_prompt(state), skills=["steward:weekly-pack"])
+        jobs.append({"key": "pack", "args": pack})
     return jobs
 
 

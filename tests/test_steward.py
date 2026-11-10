@@ -289,6 +289,7 @@ class SchedulerTests(unittest.TestCase):
         self.assertEqual(len(out["created"]), 8)
         creates = [a for _, a in cron.calls if a["action"] == "create"]
         checkin = next(a for a in creates if a["name"].startswith("Steward check-in · Site"))
+        self.assertTrue(checkin["no_agent"])  # English: fixed text, no LLM
         self.assertEqual(checkin["schedule"], "0 10 * * 4")
         self.assertEqual(checkin["timezone"], "Africa/Lagos")
         self.assertTrue(checkin["attach_to_session"])
@@ -299,6 +300,27 @@ class SchedulerTests(unittest.TestCase):
         out2 = scheduler.apply_jobs(s, self.state_path, self.tmp / "scripts", cron)
         self.assertEqual(len(out2["removed"]), 8)
         self.assertEqual(set(s["jobs"].values()), {f"job{i}" for i in range(9, 17)})
+
+    def test_translated_teams_and_founders_use_the_agent(self):
+        s = company(); core.configure(s, {"departments": [
+            {"name": "Procurement", "target": "whatsapp:3@g.us", "language": "Chinese"}],
+            "founder_language": "French"})
+        cron = FakeCron(); scheduler.apply_jobs(s, self.state_path, self.tmp / "scripts", cron)
+        creates = {a["name"]: a for _, a in cron.calls if a["action"] == "create"}
+        self.assertIn("translate", creates["Steward check-in · Procurement"]["prompt"])
+        self.assertNotIn("no_agent", creates["Steward check-in · Procurement"])
+        self.assertIn("steward_build_pack", creates["Steward weekly pack · founder"]["prompt"])
+
+    def test_checkin_and_pack_scripts_run_standalone(self):
+        import subprocess
+        s = three_weeks(); core.save_state(self.state_path, s)
+        scheduler.apply_jobs(s, self.state_path, self.tmp / "scripts", FakeCron())
+        out = subprocess.run([sys.executable, str(self.tmp / "scripts" / scheduler.script_name("checkin", "safety"))],
+                             capture_output=True, text=True, timeout=30)
+        self.assertEqual(out.returncode, 0, out.stderr); self.assertIn("Musa", out.stdout)
+        out = subprocess.run([sys.executable, str(self.tmp / "scripts" / scheduler.script_name("pack"))],
+                             capture_output=True, text=True, timeout=60)
+        self.assertEqual(out.returncode, 0, out.stderr); self.assertIn("Reply *send*", out.stdout)
 
     def test_nudge_script_runs_standalone(self):
         import subprocess
