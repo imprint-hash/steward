@@ -367,6 +367,14 @@ class ToolTests(unittest.TestCase):
         r = self.call("steward_publish", confirm=True, text="*Mise à jour* Fournisseurs payés")
         self.assertTrue(r["success"], r); self.assertIn("Mise à jour", r["preview"])
 
+    def test_record_asks_for_english_and_lists(self):
+        self.call("steward_setup", departments=[{"name": "Procurement", "language": "Chinese"}], schedule_jobs=False)
+        r = self.call("steward_record_report", department="Procurement", summary="已收到四百袋水泥")
+        self.assertTrue(r["success"]); self.assertEqual(len(r["fix_and_resave"]), 2)
+        r = self.call("steward_record_report", department="Procurement", summary="Got 400 cement bags",
+                      done=["Received 400 bags of cement"], language="Chinese")
+        self.assertNotIn("fix_and_resave", r)
+
     def test_errors_are_json_not_exceptions(self):
         r = self.call("steward_record_report", department="Nowhere", summary="x")
         self.assertFalse(r["success"]); self.assertIn("no department", r["error"])

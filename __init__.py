@@ -135,9 +135,16 @@ def record(args, **kw):
     report["attachments"] = kept
     result = core.record_report(state, dept["id"], report, week=args.get("week"))
     core.save_state(path, state)
+    fix = []
+    entry = result["report"]
+    if not entry["done"] and not entry["next_week"]:
+        fix.append("done and next_week are empty: split the update into the lists and call again")
+    if any(ch.isalpha() and ord(ch) > 0x24F   # non-Latin script: Chinese, Hindi, Arabic...
+           for ch in entry["summary"] + " ".join(entry["done"] + entry["next_week"] + entry["blockers"])):
+        fix.append("fields must be in English: translate them and call again (keep `language`)")
     left = [d["name"] for d in core.missing(state, result["week"])]
     return _ok(week=result["week"], department=result["department"], updated=result["updated"],
-               still_waiting_on=left,
+               still_waiting_on=left, **({"fix_and_resave": fix} if fix else {}),
                reply_hint=f"Thank {dept.get('lead') or 'them'} in one short line and read back the "
                           "2–3 key points so they can correct anything.")
 
@@ -272,7 +279,9 @@ SCHEMAS = {
         "name": "steward_record_report",
         "description": (
             "Save a department's weekly update after you've heard it (voice note, text, photo or file). "
-            "Extract short plain sentences in English even if they spoke another language. "
+            "ALWAYS write every field in English, even if they spoke French, Chinese, Hindi or any other "
+            "language (set `language` to what they spoke). Split the update into the lists: what got done "
+            "-> done, what's stuck -> blockers, the plan -> next_week; summary is only 1-2 sentences. "
             "promise_updates = how each of last week's planned items went. founder_only = anything "
             "they asked to keep private (shown to the founder, never to all staff). Re-saving the same "
             "week replaces the earlier report."),
@@ -302,7 +311,8 @@ SCHEMAS = {
     "steward_build_pack": ({
         "name": "steward_build_pack",
         "description": (
-            "Build the weekly pack: last week per department, promised vs done, stuck radar (blockers "
+            "Build the weekly pack. ALWAYS follow the returned post_instruction: when it says translate, "
+            "your message to the reader must be fully in that language (headings included). Contents: last week per department, promised vs done, stuck radar (blockers "
             "repeated week after week), numbers with week-on-week change, next week's agenda, and a "
             "voice_script under 150 words for text_to_speech. audience 'founder' shows everything; "
             "'staff' hides blockers, private notes, who's late and (unless enabled) numbers."),
