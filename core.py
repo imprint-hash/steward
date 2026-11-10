@@ -292,8 +292,10 @@ def record_report(state: dict, department: str, report: dict,
     key = week or week_key(local)
     summary = re.sub(r"\s+", " ", str(report.get("summary") or "")).strip()[:600]
     done = _str_list(report.get("done"), "done")
-    if not summary and not done and not add_to_existing:
-        raise ValueError("a report needs at least a summary or one thing done")
+    if not (summary or done or report.get("blockers") or report.get("next_week")
+            or report.get("numbers") or report.get("attachments")):
+        raise ValueError("the update is empty: fill summary, done, blockers and next_week (short "
+                         "English sentences) from what they said, then call again")
     numbers = []
     for n in report.get("numbers") or []:
         if not isinstance(n, dict) or not str(n.get("label", "")).strip():

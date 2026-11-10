@@ -99,6 +99,8 @@ class ReportTests(unittest.TestCase):
                                "blockers": ["Fence needs repair"], "source": "photo",
                                "attachments": [{"file": "d.jpg", "path": "/x/d.jpg"}]},
                                now=THIS_WEEK, add_to_existing=True)
+        with self.assertRaises(ValueError):
+            core.record_report(s, "Site Operations", {}, now=THIS_WEEK, add_to_existing=True)
         rep = r["report"]
         self.assertEqual(rep["done"], ["Slab poured", "Generator serviced"])
         self.assertEqual(rep["blockers"], ["Fence needs repair"])
