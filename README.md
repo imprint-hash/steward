@@ -195,6 +195,12 @@ Hermes needs to be added to each department group, and group replies must be all
 gateway settings. The default schedule is check-in on Thursday 10:00, nudge on Friday 13:00,
 founder status on Friday 15:00 and the pack on Saturday 10:00. Every time can be changed.
 
+**Running on a small or free model?** Steward works with Groq's free `openai/gpt-oss-120b`. We tested
+it end to end: setup, a file report, a Pidgin voice-note report and the founder pack. Free plans cap
+tokens per minute, so load only the tools Steward needs, e.g. `hermes chat -t steward`. On the gateway,
+limit the platform's toolsets the same way. Groq's key also powers voice-note transcription
+(`stt.provider: groq`).
+
 Steward has no extra Python dependencies. PDF text extraction uses `pypdf` if it's installed;
 otherwise Steward reads scanned PDFs with vision instead.
 
