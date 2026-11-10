@@ -133,7 +133,8 @@ def record(args, **kw):
     report = {k: args.get(k) for k in ("summary", "done", "blockers", "next_week", "numbers",
                                         "promise_updates", "founder_only", "language", "source")}
     report["attachments"] = kept
-    result = core.record_report(state, dept["id"], report, week=args.get("week"))
+    result = core.record_report(state, dept["id"], report, week=args.get("week"),
+                                add_to_existing=bool(args.get("add_to_existing")))
     core.save_state(path, state)
     fix = []
     entry = result["report"]
@@ -284,7 +285,7 @@ SCHEMAS = {
             "-> done, what's stuck -> blockers, the plan -> next_week; summary is only 1-2 sentences. "
             "promise_updates = how each of last week's planned items went. founder_only = anything "
             "they asked to keep private (shown to the founder, never to all staff). Re-saving the same "
-            "week replaces the earlier report."),
+            "week replaces the earlier report unless add_to_existing=true."),
         "parameters": {"type": "object", "properties": {
             "department": {"type": "string", "description": "Department name, id or its group's chat target"},
             "summary": {"type": "string", "description": "One or two sentences"},
@@ -303,6 +304,7 @@ SCHEMAS = {
             "language": {"type": "string", "description": "Language they used, e.g. 'Yoruba', 'Pidgin'"},
             "source": {"type": "string", "enum": ["voice", "text", "photo", "file"]},
             "week": {"type": "string", "description": "ISO week like 2026-W46; default this week"},
+            "add_to_existing": {"type": "boolean", "description": "true when this message adds to an update already saved this week (e.g. a photo after a voice note): lists are merged instead of replaced"},
         }, "required": ["department"]}}, "📝"),
     "steward_status": ({
         "name": "steward_status",
@@ -337,9 +339,18 @@ HANDLERS = {
 }
 
 
+def _on_pre_llm_call(**kw):
+    """Per-turn note on chat platforms so replies in department groups get recorded."""
+    try:
+        return core.turn_context(core.load_state(_state_path()), kw.get("platform") or "") or None
+    except Exception:
+        return None
+
+
 def register(ctx) -> None:
     global _CTX
     _CTX = ctx
+    ctx.register_hook("pre_llm_call", _on_pre_llm_call)
     for name, (schema, emoji) in SCHEMAS.items():
         ctx.register_tool(name=name, toolset=TOOLSET, schema=schema, handler=HANDLERS[name],
                           description=schema["description"].split(".")[0], emoji=emoji)

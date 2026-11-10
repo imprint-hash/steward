@@ -264,14 +264,35 @@ def _str_list(v: Any, field: str, limit: int = 20) -> List[str]:
 PROMISE_STATUSES = ("done", "partly", "not_done", "dropped")
 
 
+def _merge(old: dict, new: dict) -> dict:
+    out = dict(new)
+    for k in ("done", "blockers", "next_week", "founder_only"):
+        seen, merged = set(), []
+        for item in old.get(k, []) + new.get(k, []):
+            key = " ".join(sorted(tokens(item))) or item
+            if key not in seen:
+                seen.add(key); merged.append(item)
+        out[k] = merged
+    labels = {slug(n["label"]) for n in new.get("numbers", [])}
+    out["numbers"] = [n for n in old.get("numbers", []) if slug(n["label"]) not in labels] + new.get("numbers", [])
+    out["promise_updates"] = old.get("promise_updates", []) + new.get("promise_updates", [])
+    out["attachments"] = old.get("attachments", []) + new.get("attachments", [])
+    out["summary"] = (old.get("summary", "") + " " + new.get("summary", "")).strip()[:600] \
+        if new.get("summary") and new.get("summary") not in old.get("summary", "") else old.get("summary", "")
+    out["source"] = ",".join(dict.fromkeys((old.get("source", "") + "," + new.get("source", "")).strip(",").split(",")))
+    out["language"] = new.get("language") or old.get("language", "")
+    return out
+
+
 def record_report(state: dict, department: str, report: dict,
-                  now: Optional[datetime] = None, week: Optional[str] = None) -> dict:
+                  now: Optional[datetime] = None, week: Optional[str] = None,
+                  add_to_existing: bool = False) -> dict:
     dept = find_dept(state, department)
     local = now_in(state, now)
     key = week or week_key(local)
     summary = re.sub(r"\s+", " ", str(report.get("summary") or "")).strip()[:600]
     done = _str_list(report.get("done"), "done")
-    if not summary and not done:
+    if not summary and not done and not add_to_existing:
         raise ValueError("a report needs at least a summary or one thing done")
     numbers = []
     for n in report.get("numbers") or []:
@@ -310,6 +331,9 @@ def record_report(state: dict, department: str, report: dict,
     }
     bucket = week_bucket(state, key)
     previous = bucket["reports"].get(dept["id"])
+    if add_to_existing and previous:
+        entry = _merge(previous, entry)
+        entry["submitted_at"] = local.isoformat(timespec="minutes")
     bucket["reports"][dept["id"]] = entry
     return {"week": key, "department": dept["name"], "updated": previous is not None, "report": entry}
 
@@ -591,6 +615,30 @@ def voice_script(state, key, stuck, miss, review_all, nums) -> str:
     if not text[-1].startswith("Say send"):
         text.append("Say send when you're happy, and I'll post it to everyone.")
     return " ".join(text)
+
+
+CHAT_PLATFORMS_SKIP = {"", "cli", "tui", "desktop", "cron", "local", "api", "acp"}
+
+
+def turn_context(state: dict, platform: str) -> str:
+    """Short per-turn note for chat platforms, so a reply in a department group is
+    recorded even when the model doesn't remember the check-in."""
+    depts = state.get("departments") or []
+    if not depts or str(platform or "").lower() in CHAT_PLATFORMS_SKIP:
+        return ""
+    groups = "; ".join(
+        f"{d['name']}" + (f" = {d['target']}" if d.get("target") else "")
+        + (f" (team language: {d['language']})" if d.get("language") else "") for d in depts)
+    founder = state.get("founder_target") or "not set"
+    return (
+        f"[Steward is running for {state.get('company') or 'this company'}. Department groups: {groups}. "
+        f"Founder chat: {founder}. If this message comes from one of those groups and is a weekly "
+        "update (voice note, text, photo or file) or adds to one, save it with steward_record_report "
+        "(department = the group name or chat id; set add_to_existing=true if they already sent part "
+        "of it this week; pass photos/files in attachments), then reply briefly IN THE SENDER'S "
+        "LANGUAGE reading back 2-3 key points. If the founder replies 'send' (in any language) to the "
+        "weekly pack, call steward_publish with confirm=true. Ignore unrelated chatter.]"
+    )
 
 
 def status_text(state: dict, now: Optional[datetime] = None) -> str:

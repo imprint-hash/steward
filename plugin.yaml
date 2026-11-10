@@ -16,6 +16,7 @@ provides_tools:
   - steward_status
   - steward_build_pack
   - steward_publish
-provides_hooks: []
+provides_hooks:
+  - pre_llm_call
 requires_env: []
 python_dependencies: []

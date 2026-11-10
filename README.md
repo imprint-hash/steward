@@ -176,6 +176,7 @@ Steward is built on Hermes' own features. It sends nothing by itself.
 | **Gateway document handling** | PDF / Word / Excel reports, read with `steward_read_file` |
 | **`text_to_speech`** | the founder's 60-second voice brief |
 | **Plugin skills** (`steward:checkin`, `steward:weekly-pack`) | how to run the 2-minute interview and the approval flow |
+| **`pre_llm_call` hook** | on chat platforms, each turn gets a short note naming the department groups, so a reply in a group is always recorded, even by a small model that has lost the check-in context |
 | **Slash command** `/steward` | `status`, `pack`, `staff`, `send`, `checkin <dept>` |
 | **Automation Blueprint** (v0.23) | "Weekly department reports" appears in the Hermes automations gallery |
 | **Plugin storage** under `HERMES_HOME` | reports and copies of files sent in, with owner-only file permissions |
@@ -227,7 +228,7 @@ otherwise Steward reads scanned PDFs with vision instead.
 ```bash
 python -m unittest discover -s tests -v
 ```
-There are 31 tests. They cover week maths across timezones and years, quiet hours, nudging only the
+There are 33 tests. They cover week maths across timezones and years, quiet hours, nudging only the
 missing teams, promised vs done, the stuck radar, the numbers deltas, the founder vs staff packs,
 Word, Excel and CSV parsing, the cron job plan and its replacement, the publish approval gate and
 double-send protection. The plugin passes `hermes plugins validate`. We also ran it against Hermes

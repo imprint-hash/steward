@@ -91,6 +91,29 @@ class ReportTests(unittest.TestCase):
             core.record_report(s, "Safety", {"summary": "ok", "language": None, "source": None}, now=THIS_WEEK)
         self.assertEqual(r["report"]["language"], ""); self.assertEqual(r["report"]["source"], "text")
 
+    def test_add_to_existing_merges(self):
+        s = company()
+        core.record_report(s, "Site Operations", {"summary": "Slab poured", "done": ["Slab poured"],
+                                                  "source": "voice"}, now=THIS_WEEK)
+        r = core.record_report(s, "Site Operations", {"done": ["Generator serviced", "slab poured"],
+                               "blockers": ["Fence needs repair"], "source": "photo",
+                               "attachments": [{"file": "d.jpg", "path": "/x/d.jpg"}]},
+                               now=THIS_WEEK, add_to_existing=True)
+        rep = r["report"]
+        self.assertEqual(rep["done"], ["Slab poured", "Generator serviced"])
+        self.assertEqual(rep["blockers"], ["Fence needs repair"])
+        self.assertEqual(rep["source"], "voice,photo"); self.assertEqual(len(rep["attachments"]), 1)
+        self.assertEqual(rep["summary"], "Slab poured")
+
+    def test_turn_context_only_on_chat_platforms(self):
+        s = company()
+        self.assertEqual(core.turn_context(s, "cli"), "")
+        self.assertEqual(core.turn_context(core.empty_state(), "whatsapp"), "")
+        t = core.turn_context(s, "whatsapp")
+        self.assertIn("Procurement = whatsapp:120363000000000003@g.us", t)
+        self.assertIn("Finance (team language: French)", t)
+        self.assertIn("steward_publish", t)
+
     def test_find_by_group_target(self):
         s = company()
         d = core.find_dept(s, "whatsapp:120363000000000003@g.us")
