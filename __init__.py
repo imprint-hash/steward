@@ -171,7 +171,14 @@ def publish(args, **kw):
     if bucket.get("sent") and not args.get("resend"):
         raise ValueError(f"this week's pack was already sent at {bucket['sent']}; pass resend=true to send again")
     pack = core.build_pack(state, key, "staff")
-    bucket["published_text"] = pack["text"]
+    text = pack["text"]
+    if core.language_for(state, "staff"):
+        text = str(args.get("text") or "").strip()
+        if not text:
+            raise ValueError(f"all staff read {pack['language']}: call steward_build_pack with "
+                             "audience='staff', translate its text as post_instruction says, and pass "
+                             "it here as text")
+    bucket["published_text"] = text[:6000]
     core.save_state(path, state)
     r = scheduler.publish_job(state, key, path, _scripts_dir(), _dispatch)
     if not r.get("success"):
@@ -179,7 +186,7 @@ def publish(args, **kw):
     bucket["sent"] = core.now_in(state).isoformat(timespec="minutes")
     core.save_state(path, state)
     return _ok(week=key, to=state["all_staff_target"], job_id=r.get("job_id"),
-               note="Posting to the all-staff group within a minute.", preview=pack["text"])
+               note="Posting to the all-staff group within a minute.", preview=text)
 
 
 # ─── slash command ─────────────────────────────────────────────────────────────
@@ -232,7 +239,8 @@ SCHEMAS = {
             "all_staff_target": {"type": "string", "description": "All-staff group for the approved pack"},
             "departments": {"type": "array", "items": {"type": "object", "properties": {
                 "name": {"type": "string"}, "lead": {"type": "string"},
-                "target": {"type": "string", "description": "The department's group chat"}},
+                "target": {"type": "string", "description": "The department's group chat"},
+                "language": {"type": "string", "description": "Language the team prefers, e.g. 'French', 'Hindi'. Default English."}},
                 "required": ["name"]}},
             "checkin_day": {"type": "string"}, "checkin_time": {"type": "string", "description": "HH:MM"},
             "nudge_day": {"type": "string"}, "nudge_time": {"type": "string"},
@@ -242,6 +250,8 @@ SCHEMAS = {
                 "start": {"type": "string"}, "end": {"type": "string"}},
                 "description": "No nudges or status in this window, e.g. {start: '19:00', end: '08:00'}"},
             "off_days": {**_STR_LIST, "description": "Days with no nudges, e.g. ['sun']"},
+            "founder_language": {"type": "string", "description": "Language for the founder's pack and voice brief, e.g. 'French', 'Chinese'. Default English."},
+            "staff_language": {"type": "string", "description": "Language of the all-staff update. Default: same as founder_language."},
             "share_numbers_with_staff": {"type": "boolean", "description": "Default false: numbers appear only in the founder pack."},
             "schedule_jobs": {"type": "boolean", "description": "Default true. False = save settings only."},
         }}}, "📋"),
@@ -305,7 +315,8 @@ SCHEMAS = {
             "Post the staff version of this week's pack to the all-staff group. ONLY after the founder "
             "clearly approves (e.g. replies 'send'). Never on your own initiative."),
         "parameters": {"type": "object", "properties": {
-            "confirm": {"type": "boolean"}, "resend": {"type": "boolean"}, "week": {"type": "string"}},
+            "confirm": {"type": "boolean"}, "resend": {"type": "boolean"}, "week": {"type": "string"},
+            "text": {"type": "string", "description": "Only when staff use a language other than English: the staff pack translated per post_instruction"}},
             "required": ["confirm"]}}, "📣"),
 }
 

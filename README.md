@@ -50,6 +50,18 @@ platform the Hermes gateway connects to:
 A company can mix them. For example, Site Operations can be on WhatsApp while the founder reads the
 pack on Telegram.
 
+### Every team in its own language
+- **Each department can have its own language.** The Finance check-in can go out in French, the
+  Safety one in Hindi and the Procurement one in Chinese or Spanish.
+- **People answer in whatever they speak:** French, Hindi or Hinglish, Mandarin or Cantonese,
+  Spanish, Portuguese, Arabic, Swahili, Pidgin, Yoruba or Hausa. Steward replies **in their own
+  language** and reads back what it understood.
+- **The founder chooses the language of the pack and the voice brief:** English, French, Chinese
+  or whatever they're used to. The all-staff update follows the founder's choice, or it can have
+  its own language.
+- Reports are always stored in plain English, so promised vs done and the stuck radar work across
+  languages. Translation keeps every name, number and date unchanged.
+
 ---
 
 ## Impact
@@ -215,7 +227,7 @@ otherwise Steward reads scanned PDFs with vision instead.
 ```bash
 python -m unittest discover -s tests -v
 ```
-There are 26 tests. They cover week maths across timezones and years, quiet hours, nudging only the
+There are 28 tests. They cover week maths across timezones and years, quiet hours, nudging only the
 missing teams, promised vs done, the stuck radar, the numbers deltas, the founder vs staff packs,
 Word, Excel and CSV parsing, the cron job plan and its replacement, the publish approval gate and
 double-send protection. The plugin passes `hermes plugins validate`. We also ran it against Hermes

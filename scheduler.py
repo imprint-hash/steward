@@ -63,8 +63,9 @@ def checkin_prompt(state: dict, dept: dict) -> str:
     return (
         f"You are Steward, chief of staff for {state.get('company') or 'the company'}. "
         f"Weekly check-in for the {dept['name']} department. "
-        f"Call steward_checkin with department='{dept['id']}' and post its 'message' exactly as your "
-        f"final answer, nothing else. If already_reported is true, instead post one short line "
+        f"Call steward_checkin with department='{dept['id']}' and post its 'message' as your final "
+        f"answer, following its post_instruction (it may ask you to translate it into the team's "
+        f"language), nothing else. If already_reported is true, instead post one short line "
         f"thanking {dept.get('lead') or 'the team'} for sending this week's update early."
     )
 
@@ -73,9 +74,10 @@ def pack_prompt(state: dict) -> str:
     return (
         f"You are Steward, chief of staff for {state.get('company') or 'the company'}. "
         "Build this week's founder pack: call steward_build_pack with audience='founder'. "
-        "Then call text_to_speech with the returned voice_script so the founder gets a short "
-        "voice brief. Your final answer is the pack text exactly as returned, followed by one line: "
-        "'Reply *send* to post the staff version to everyone, or tell me what to change.'"
+        "Follow its post_instruction (it may ask you to translate into the founder's language). "
+        "Then call text_to_speech with the voice_script (translated if asked) so the founder gets a "
+        "short voice brief. Your final answer is the pack text, followed by one line in the same "
+        "language: 'Reply *send* to post the staff version to everyone, or tell me what to change.'"
     )
 
 

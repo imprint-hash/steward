@@ -115,6 +115,7 @@ def empty_state() -> dict:
     return {"version": STATE_VERSION, "company": "", "timezone": "UTC",
             "founder_target": "", "all_staff_target": "", "departments": [],
             "schedule": dict(DEFAULT_SCHEDULE), "quiet_hours": {}, "off_days": [], "share_numbers_with_staff": False,
+            "founder_language": "", "staff_language": "",
             "jobs": {}, "weeks": {}}
 
 
@@ -164,7 +165,8 @@ def configure(state: dict, cfg: dict) -> dict:
                 raise ValueError(f"department {name!r} is listed twice")
             seen.add(did)
             depts.append({"id": did, "name": name, "lead": str(d.get("lead", "")).strip(),
-                          "target": str(d.get("target", "")).strip()})
+                          "target": str(d.get("target", "")).strip(),
+                          "language": str(d.get("language") or "").strip()[:30]})
         state["departments"] = depts
     sched = dict(state.get("schedule") or DEFAULT_SCHEDULE)
     for k in DEFAULT_SCHEDULE:
@@ -178,6 +180,9 @@ def configure(state: dict, cfg: dict) -> dict:
         if q:
             parse_hhmm(q.get("start", "")); parse_hhmm(q.get("end", ""))
         state["quiet_hours"] = {"start": q.get("start"), "end": q.get("end")} if q else {}
+    for k in ("founder_language", "staff_language"):
+        if cfg.get(k) is not None:
+            state[k] = str(cfg[k] or "").strip()[:30]
     if cfg.get("share_numbers_with_staff") is not None:
         state["share_numbers_with_staff"] = bool(cfg["share_numbers_with_staff"])
     if cfg.get("off_days") is not None:
@@ -340,8 +345,13 @@ def checkin_message(state: dict, department: str, now: Optional[datetime] = None
         lines += ["", "Last week you planned:"] + [f"• {p}" for p in promises] + \
                  ["Quick word on how each went?"]
     already = key in state.get("weeks", {}) and dept["id"] in state["weeks"][key]["reports"]
+    lang = "" if is_english(dept.get("language") or "") else dept["language"]
     return {"week": key, "department": dept["name"], "promises": promises,
-            "already_reported": already, "message": "\n".join(lines)}
+            "already_reported": already, "language": lang or "English",
+            "message": "\n".join(lines),
+            "post_instruction": (f"Translate this message naturally into {lang} before posting; keep "
+                                 "names, numbers and the bullet list as they are.") if lang
+                                else "Post the message as it is."}
 
 
 def nudge_message(state: dict, department: str, now: Optional[datetime] = None) -> str:
@@ -523,9 +533,25 @@ def build_pack(state: dict, key: Optional[str] = None, audience: str = "founder"
         out.append("No plans sent yet.")
 
     voice = voice_script(state, key, stuck, miss, review_all, nums)
+    lang = language_for(state, audience)
     return {"week": key, "audience": audience, "text": "\n".join(out).strip(),
+            "language": lang or "English",
+            "post_instruction": (f"Translate the text{' and voice_script' if founder else ''} naturally into "
+                                 f"{lang}. Keep every name, number, date, emoji and line exactly; "
+                                 "add nothing.") if lang else "Use the text as it is.",
             "voice_script": voice if founder else "", "missing": [d["name"] for d in miss],
             "stuck": stuck, "numbers": nums, "promises": review_all}
+
+
+def is_english(lang: str) -> bool:
+    return not lang or lang.strip().lower() in ("en", "english", "eng")
+
+
+def language_for(state: dict, audience: str) -> str:
+    """'' means English (no translation needed)."""
+    lang = state.get("founder_language") if audience == "founder" else \
+        (state.get("staff_language") or state.get("founder_language"))
+    return "" if is_english(lang or "") else lang
 
 
 def voice_script(state, key, stuck, miss, review_all, nums) -> str:

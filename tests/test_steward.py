@@ -29,7 +29,7 @@ def company():
             {"name": "Site Operations", "lead": "Tunde", "target": "whatsapp:120363000000000002@g.us"},
             {"name": "Procurement", "lead": "Ngozi", "target": "whatsapp:120363000000000003@g.us"},
             {"name": "Safety", "lead": "Musa", "target": "whatsapp:120363000000000004@g.us"},
-            {"name": "Finance", "lead": "Bisi"},
+            {"name": "Finance", "lead": "Bisi", "language": "French"},
         ],
         "quiet_hours": {"start": "19:00", "end": "08:00"}, "off_days": ["sun"],
     })
@@ -185,6 +185,16 @@ class PackTests(unittest.TestCase):
         self.assertIn("Formwork", core.build_pack(s, "2026-W45", "founder")["text"])
         self.assertNotIn("2 Procurement", p["voice_script"])  # sentences end with a full stop
 
+    def test_founder_and_staff_languages(self):
+        s = three_weeks()
+        self.assertEqual(core.build_pack(s, "2026-W46", "founder")["post_instruction"], "Use the text as it is.")
+        core.configure(s, {"founder_language": "Chinese"})
+        p = core.build_pack(s, "2026-W46", "founder")
+        self.assertEqual(p["language"], "Chinese"); self.assertIn("into Chinese", p["post_instruction"])
+        self.assertIn("into Chinese", core.build_pack(s, "2026-W46", "staff")["post_instruction"])
+        core.configure(s, {"staff_language": "English"})
+        self.assertEqual(core.build_pack(s, "2026-W46", "staff")["language"], "English")
+
     def test_staff_pack_hides_private_things(self):
         s = three_weeks()
         t = core.build_pack(s, "2026-W46", "staff")["text"]
@@ -202,6 +212,9 @@ class PackTests(unittest.TestCase):
         self.assertIn("Book crane for level 3", m["message"])
         self.assertTrue(m["already_reported"])
         self.assertIn("photo/file", m["message"])
+        self.assertIn("Post the message as it is", m["post_instruction"])
+        fin = core.checkin_message(s, "Finance", now=THIS_WEEK)
+        self.assertEqual(fin["language"], "French"); self.assertIn("into French", fin["post_instruction"])
 
 
 class FileTests(unittest.TestCase):
@@ -345,6 +358,14 @@ class ToolTests(unittest.TestCase):
         r = self.call("steward_setup", departments=[{"name": "HR", "target": "whatsapp:9@g.us"}])
         self.assertFalse(r["success"]); self.assertIn("failed", r["error"])
         self.assertTrue((self.tmp / "steward" / "state.json").exists())  # settings still saved
+
+    def test_publish_needs_translation_when_staff_language_set(self):
+        self.call("steward_setup", all_staff_target="whatsapp:1203@g.us", staff_language="French",
+                  departments=[{"name": "Finance", "target": "whatsapp:2@g.us"}])
+        self.call("steward_record_report", department="Finance", summary="Fournisseurs payés")
+        self.assertFalse(self.call("steward_publish", confirm=True)["success"])
+        r = self.call("steward_publish", confirm=True, text="*Mise à jour* Fournisseurs payés")
+        self.assertTrue(r["success"], r); self.assertIn("Mise à jour", r["preview"])
 
     def test_errors_are_json_not_exceptions(self):
         r = self.call("steward_record_report", department="Nowhere", summary="x")
