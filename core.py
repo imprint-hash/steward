@@ -513,10 +513,13 @@ def build_pack(state: dict, key: Optional[str] = None, audience: str = "founder"
         if not rep:
             continue
         out.append(f"*{d['name']}*")
-        if rep.get("summary"):
+        # staff never see the free-text summary: it can mention problems or private matters
+        if founder and rep.get("summary"):
             out.append(rep["summary"])
         for item in rep.get("done", []):
             out.append(f"• {item}")
+        if not founder and not rep.get("done"):
+            out.append("• Update received")
         review = promise_review(state, d["id"], key)
         review_all[d["name"]] = review
         if founder and review:

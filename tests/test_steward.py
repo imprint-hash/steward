@@ -225,7 +225,8 @@ class PackTests(unittest.TestCase):
         t = core.build_pack(s, "2026-W46", "staff")["text"]
         for hidden in ("prices rise", "Stuck radar", "waiting on", "Promised vs done", "📎", "finance approval"):
             self.assertNotIn(hidden, t)
-        self.assertIn("Slab poured on level 2", t)
+        self.assertIn("Poured slab on level 2", t)
+        self.assertNotIn("Cement finally ordered", t)   # summaries stay founder-only
         self.assertNotIn("Reports in", t); self.assertNotIn("Numbers", t)
         s["share_numbers_with_staff"] = True
         self.assertIn("42% (▲ 4)", core.build_pack(s, "2026-W46", "staff")["text"])
@@ -394,11 +395,11 @@ class ToolTests(unittest.TestCase):
         self.assertFalse(self.call("steward_publish", confirm=False)["success"])
         r = self.call("steward_publish", confirm=True)
         self.assertTrue(r["success"], r)
-        self.assertIn("Level 2 slab poured", r["preview"])
+        self.assertIn("Poured slab", r["preview"]); self.assertNotIn("Level 2 slab poured", r["preview"])
         self.assertFalse(self.call("steward_publish", confirm=True)["success"])  # no double send
         state = json.loads((self.tmp / "steward" / "state.json").read_text())
         self.assertTrue(state["weeks"][week]["sent"])
-        self.assertIn("Level 2 slab poured", state["weeks"][week]["published_text"])
+        self.assertIn("Poured slab", state["weeks"][week]["published_text"])
 
     def test_setup_reports_failed_schedules(self):
         steward._CTX.dispatch_tool = staticmethod(lambda n, a: json.dumps({"error": "Unknown tool: cronjob_manage"}))

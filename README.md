@@ -13,8 +13,8 @@ Steward is a [Hermes Agent](https://github.com/NousResearch/hermes-agent) plugin
    listen to on the way to work. The pack covers last week, *promised vs done*, a *stuck radar*,
    the numbers with week-on-week change, and next week's agenda.
 4. **Posts the staff version to the all-staff group** once the founder replies **"send"**. The staff
-   version leaves out the blockers, who was late, anything marked private and (unless you switch
-   it on) the numbers.
+   version shows only what got done. It leaves out the blockers, the free-text summaries, who was late,
+   anything marked private and (unless you switch it on) the numbers.
 
 Nobody installs an app, opens a dashboard or fills in a form. Each department lead answers in the
 group they already use.
