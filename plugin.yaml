@@ -17,6 +17,5 @@ provides_tools:
   - steward_build_pack
   - steward_publish
 provides_hooks: []
-provides_middleware: []
 requires_env: []
 python_dependencies: []
