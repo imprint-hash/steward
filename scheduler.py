@@ -84,8 +84,8 @@ def write_script(scripts_dir: Path, name: str, state_path: Path, body: str) -> s
 
 def _hermes_root() -> str:
     try:
-        import tools  # Hermes's package; absent in plain unit tests
-        return str(Path(tools.__file__).resolve().parent.parent)
+        import hermes_constants  # public plugin API module; absent in plain unit tests
+        return str(Path(hermes_constants.__file__).resolve().parent)
     except Exception:
         return ""
 
