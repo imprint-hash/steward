@@ -264,7 +264,7 @@ def record_report(state: dict, department: str, report: dict,
     dept = find_dept(state, department)
     local = now_in(state, now)
     key = week or week_key(local)
-    summary = re.sub(r"\s+", " ", str(report.get("summary", ""))).strip()[:600]
+    summary = re.sub(r"\s+", " ", str(report.get("summary") or "")).strip()[:600]
     done = _str_list(report.get("done"), "done")
     if not summary and not done:
         raise ValueError("a report needs at least a summary or one thing done")
@@ -297,8 +297,8 @@ def record_report(state: dict, department: str, report: dict,
         "numbers": numbers,
         "promise_updates": updates,
         "founder_only": _str_list(report.get("founder_only"), "founder_only"),
-        "language": str(report.get("language", "")).strip()[:30],
-        "source": str(report.get("source", "text")).strip().lower()[:20] or "text",
+        "language": str(report.get("language") or "").strip()[:30],
+        "source": str(report.get("source") or "text").strip().lower()[:20] or "text",
         "attachments": [{"file": str(a.get("file", ""))[:120], "kind": str(a.get("kind", ""))[:20],
                          "path": str(a.get("path", ""))[:400]}
                         for a in (report.get("attachments") or []) if isinstance(a, dict)][:10],

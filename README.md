@@ -215,7 +215,7 @@ otherwise Steward reads scanned PDFs with vision instead.
 ```bash
 python -m unittest discover -s tests -v
 ```
-There are 25 tests. They cover week maths across timezones and years, quiet hours, nudging only the
+There are 26 tests. They cover week maths across timezones and years, quiet hours, nudging only the
 missing teams, promised vs done, the stuck radar, the numbers deltas, the founder vs staff packs,
 Word, Excel and CSV parsing, the cron job plan and its replacement, the publish approval gate and
 double-send protection. The plugin passes `hermes plugins validate`. We also ran it against Hermes

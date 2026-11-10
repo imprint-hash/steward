@@ -85,6 +85,12 @@ class ReportTests(unittest.TestCase):
         self.assertFalse(r1["updated"]); self.assertTrue(r2["updated"])
         self.assertEqual(s["weeks"]["2026-W46"]["reports"]["safety"]["numbers"][0]["value"], 0)
 
+    def test_none_fields_are_blank(self):
+        s = company()
+        r = \
+            core.record_report(s, "Safety", {"summary": "ok", "language": None, "source": None}, now=THIS_WEEK)
+        self.assertEqual(r["report"]["language"], ""); self.assertEqual(r["report"]["source"], "text")
+
     def test_find_by_group_target(self):
         s = company()
         d = core.find_dept(s, "whatsapp:120363000000000003@g.us")
