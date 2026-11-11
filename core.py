@@ -60,6 +60,13 @@ def week_key(dt: datetime) -> str:
     return f"{y}-W{w:02d}"
 
 
+def validate_week(week: str) -> str:
+    """A week key from outside (the model) must look exactly like 2026-W46."""
+    if not isinstance(week, str) or not re.fullmatch(r"\d{4}-W\d{2}", week):
+        raise ValueError(f"week must look like 2026-W46, got {week!r}")
+    return week
+
+
 def shift_week(key: str, n: int) -> str:
     y, w = key.split("-W")
     monday = datetime.fromisocalendar(int(y), int(w), 1)
@@ -289,7 +296,7 @@ def record_report(state: dict, department: str, report: dict,
                   add_to_existing: bool = False) -> dict:
     dept = find_dept(state, department)
     local = now_in(state, now)
-    key = week or week_key(local)
+    key = validate_week(week) if week is not None else week_key(local)
     summary = re.sub(r"\s+", " ", str(report.get("summary") or "")).strip()[:600]
     done = _str_list(report.get("done"), "done")
     if not (summary or done or report.get("blockers") or report.get("next_week")

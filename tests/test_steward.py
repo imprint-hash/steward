@@ -244,8 +244,12 @@ class PackTests(unittest.TestCase):
 
 
 class FileTests(unittest.TestCase):
+    """Files sit in a temp HERMES_HOME's cache/documents, where Hermes saves chat attachments."""
+
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp())
+        self.home = Path(tempfile.mkdtemp())
+        self.tmp = self.home / "cache" / "documents"
+        self.tmp.mkdir(parents=True)
 
     def _zip(self, name, members):
         p = self.tmp / name
@@ -259,7 +263,7 @@ class FileTests(unittest.TestCase):
         doc = (f'<w:document {W}><w:body><w:p><w:r><w:t>Weekly site report</w:t></w:r></w:p>'
                '<w:tbl><w:tr><w:tc><w:p><w:r><w:t>Item</w:t></w:r></w:p></w:tc>'
                '<w:tc><w:p><w:r><w:t>Status</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:body></w:document>')
-        r = files.read_report_file(str(self._zip("report.docx", {"word/document.xml": doc})))
+        r = files.read_report_file(str(self._zip("report.docx", {"word/document.xml": doc})), self.home)
         self.assertIn("Weekly site report", r["text"]); self.assertIn("Item | Status", r["text"])
 
     def test_xlsx(self):
@@ -269,24 +273,24 @@ class FileTests(unittest.TestCase):
         sh = (f'<worksheet {S}><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c>'
               '<c r="C1"><v>400</v></c></row></sheetData></worksheet>')
         r = files.read_report_file(str(self._zip("numbers.xlsx", {
-            "xl/workbook.xml": wb, "xl/sharedStrings.xml": ss, "xl/worksheets/sheet1.xml": sh})))
+            "xl/workbook.xml": wb, "xl/sharedStrings.xml": ss, "xl/worksheets/sheet1.xml": sh})), self.home)
         self.assertIn("Sheet: Week 46", r["text"]); self.assertIn("Cement bags |  | 400", r["text"])
 
     def test_csv_photo_and_unknown(self):
         c = self.tmp / "n.csv"; c.write_text("label,value\nIncidents,0\n")
-        self.assertIn("Incidents | 0", files.read_report_file(str(c))["text"])
+        self.assertIn("Incidents | 0", files.read_report_file(str(c), self.home)["text"])
         ph = self.tmp / "diary.jpg"; ph.write_bytes(b"\xff\xd8\xff")
-        r = files.read_report_file(str(ph))
+        r = files.read_report_file(str(ph), self.home)
         self.assertEqual(r["kind"], "photo"); self.assertIn("vision_analyze", r["hint"])
         with self.assertRaises(FileNotFoundError):
-            files.read_report_file(str(self.tmp / "nope.pdf"))
+            files.read_report_file(str(self.tmp / "nope.pdf"), self.home)
 
     def test_keep_copy_no_overwrite(self):
         a = self.tmp / "r.txt"; a.write_text("one")
-        dest = self.tmp / "kept"
-        p1 = files.keep_copy(str(a), dest)
+        dest = self.home / "steward" / "files" / "kept"
+        p1 = files.keep_copy(str(a), dest, self.home)
         a.write_text("two")
-        p2 = files.keep_copy(str(a), dest)
+        p2 = files.keep_copy(str(a), dest, self.home)
         self.assertNotEqual(p1, p2)
         self.assertEqual(Path(p1).read_text(), "one")
 
@@ -383,7 +387,8 @@ class ToolTests(unittest.TestCase):
                       all_staff_target="whatsapp:1203@g.us",
                       departments=[{"name": "Site Operations", "lead": "Tunde", "target": "whatsapp:1@g.us"}])
         self.assertTrue(r["success"], r); self.assertEqual(len(r["jobs"]["created"]), 4)
-        diary = self.tmp / "diary.jpg"; diary.write_bytes(b"\xff\xd8\xff")
+        (self.tmp / "cache" / "images").mkdir(parents=True)
+        diary = self.tmp / "cache" / "images" / "diary.jpg"; diary.write_bytes(b"\xff\xd8\xff")
         r = self.call("steward_record_report", department="whatsapp:1@g.us",
                       summary="Level 2 slab poured", done=["Poured slab"], source="photo",
                       language="Pidgin", attachments=[{"path": str(diary)}])

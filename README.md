@@ -226,7 +226,11 @@ otherwise Steward reads scanned PDFs with vision instead.
 
 ## What Steward touches (disclosures)
 - **Files:** settings and reports in `HERMES_HOME/steward/state.json` (mode 600). Copies of photos and files
-  sent in as reports go in `HERMES_HOME/steward/files/<week>/<department>/`.
+  sent in as reports go in `HERMES_HOME/steward/files/<week>/<department>/`. `steward_read_file` and report
+  attachments are limited to files people sent in the chat: Steward only reads or copies files inside
+  Hermes's incoming media folders (`cache/images`, `cache/audio`, `cache/videos`, `cache/documents`),
+  after resolving symlinks, and refuses any other path (such as `auth.json` or token files). The `week`
+  value must look like `2026-W46`.
 - **Scripts:** writes small helper scripts named `steward_*.py` into `HERMES_HOME/scripts/` for the no-LLM
   cron jobs (check-ins, nudges, status, founder pack, publish). Re-running setup rewrites them, and they
   are safe to delete.

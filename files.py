@@ -99,10 +99,55 @@ def _pdf(path: Path) -> str | None:
     return "\n\n".join((p.extract_text() or "") for p in reader.pages[:30])
 
 
-def read_report_file(path: str) -> dict:
-    p = Path(str(path)).expanduser()
-    if not p.is_file():
+MEDIA_DIRS = (("cache/images", "image_cache"), ("cache/audio", "audio_cache"),
+              ("cache/videos", "video_cache"), ("cache/documents", "document_cache"))
+OUTSIDE_MEDIA = ("Steward only reads files people sent in the chat (Hermes's incoming media "
+                 "folders); this path is outside them")
+
+
+def allowed_roots(home: Path) -> list[Path]:
+    """Hermes's inbound media cache folders under ``home`` (where chat attachments are saved)."""
+    home = Path(home)
+    try:
+        from hermes_constants import get_hermes_dir
+    except Exception:  # plain unit tests, no Hermes on the path
+        get_hermes_dir = None
+    roots = []
+    for new, old in MEDIA_DIRS:
+        if get_hermes_dir is not None:
+            roots.append(Path(get_hermes_dir(new, old, home=home)))
+        else:
+            roots.append(home / new)
+    return roots
+
+
+def _confined(path: str, home: Path) -> Path:
+    """Resolve ``path`` (following symlinks) and refuse it unless it's a regular file inside a media folder."""
+    roots = []
+    for r in allowed_roots(home):
+        try:
+            roots.append(r.resolve(strict=True))
+        except (OSError, RuntimeError):
+            continue
+    try:
+        p = Path(str(path)).expanduser().resolve(strict=False)
+    except (OSError, RuntimeError):
+        raise ValueError(OUTSIDE_MEDIA)
+    if not any(p.is_relative_to(r) for r in roots):
+        raise ValueError(OUTSIDE_MEDIA)
+    try:
+        p = p.resolve(strict=True)
+    except (OSError, RuntimeError):
         raise FileNotFoundError(f"no file at {path!r}")
+    if not any(p.is_relative_to(r) for r in roots):
+        raise ValueError(OUTSIDE_MEDIA)
+    if not p.is_file():
+        raise ValueError("Steward only reads regular files")
+    return p
+
+
+def read_report_file(path: str, home: Path) -> dict:
+    p = _confined(path, home)
     if p.stat().st_size > MAX_BYTES:
         raise ValueError("file is larger than 25 MB")
     ext = p.suffix.lower()
@@ -140,10 +185,21 @@ def read_report_file(path: str) -> dict:
     return {"file": p.name, "kind": kind, "text": text, "truncated": clipped, "hint": hint}
 
 
-def keep_copy(path: str, dest_dir: Path) -> str:
-    """Keep the original next to the report so the founder can open it later."""
-    src = Path(str(path)).expanduser()
-    dest_dir.mkdir(parents=True, exist_ok=True)
+def keep_copy(path: str, dest_dir: Path, home: Path) -> str:
+    """Keep the original next to the report so the founder can open it later.
+
+    Only files from Hermes's media folders are copied, and only into ``home/steward/files``.
+    """
+    src = _confined(path, home)
+    base = Path(home) / "steward" / "files"
+    base.mkdir(parents=True, exist_ok=True)
+    base = base.resolve(strict=True)
+    if not Path(dest_dir).resolve(strict=False).is_relative_to(base):
+        raise ValueError("copies can only be kept under Steward's files folder")
+    Path(dest_dir).mkdir(parents=True, exist_ok=True)
+    dest_dir = Path(dest_dir).resolve(strict=True)
+    if not dest_dir.is_relative_to(base):
+        raise ValueError("copies can only be kept under Steward's files folder")
     safe = re.sub(r"[^A-Za-z0-9._ -]+", "_", src.name)[:120] or "report"
     dest = dest_dir / safe
     i = 1

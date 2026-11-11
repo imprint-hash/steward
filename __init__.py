@@ -37,6 +37,14 @@ def _scripts_dir() -> Path:
     return _home() / "scripts"
 
 
+def _week_arg(args: dict, state: dict) -> str:
+    """The model-supplied week (validated) or this week. An empty string is refused, not defaulted."""
+    week = args.get("week")
+    if week is None:
+        return core.week_key(core.now_in(state))
+    return core.validate_week(week)
+
+
 def _ok(**data) -> str:
     return json.dumps({"success": True, **data}, ensure_ascii=False, default=str)
 
@@ -104,7 +112,7 @@ def checkin(args, **kw):
 
 @_guard
 def read_file(args, **kw):
-    info = files.read_report_file(args.get("path", ""))
+    info = files.read_report_file(args.get("path", ""), _home())
     return _ok(**info, next_step="Turn this into the report fields and call steward_record_report, "
                "passing this file in attachments. Ask the sender only about what's unclear.")
 
@@ -113,8 +121,8 @@ def read_file(args, **kw):
 def record(args, **kw):
     path = _state_path()
     state = core.load_state(path)
+    week = _week_arg(args, state)
     dept = core.find_dept(state, args.get("department", ""))
-    week = args.get("week") or core.week_key(core.now_in(state))
     kept = []
     for a in args.get("attachments") or []:
         if isinstance(a, str):
@@ -123,7 +131,7 @@ def record(args, **kw):
         if not src:
             continue
         try:
-            copy = files.keep_copy(src, path.parent / "files" / week / dept["id"])
+            copy = files.keep_copy(src, path.parent / "files" / week / dept["id"], _home())
         except OSError as e:
             raise ValueError(f"couldn't keep a copy of {src}: {e}")
         name = Path(src).name
@@ -133,7 +141,7 @@ def record(args, **kw):
     report = {k: args.get(k) for k in ("summary", "done", "blockers", "next_week", "numbers",
                                         "promise_updates", "founder_only", "language", "source")}
     report["attachments"] = kept
-    result = core.record_report(state, dept["id"], report, week=args.get("week"),
+    result = core.record_report(state, dept["id"], report, week=week,
                                 add_to_existing=bool(args.get("add_to_existing")))
     core.save_state(path, state)
     fix = []
@@ -161,7 +169,7 @@ def status(args, **kw):
 @_guard
 def build_pack(args, **kw):
     state = core.load_state(_state_path())
-    pack = core.build_pack(state, args.get("week"), args.get("audience", "founder"))
+    pack = core.build_pack(state, _week_arg(args, state), args.get("audience", "founder"))
     return _ok(**pack)
 
 
@@ -174,7 +182,7 @@ def publish(args, **kw):
     state = core.load_state(path)
     if not state.get("all_staff_target"):
         raise ValueError("no all-staff group set; run steward_setup with all_staff_target first")
-    key = args.get("week") or core.week_key(core.now_in(state))
+    key = _week_arg(args, state)
     bucket = core.week_bucket(state, key)
     if bucket.get("sent") and not args.get("resend"):
         raise ValueError(f"this week's pack was already sent at {bucket['sent']}; pass resend=true to send again")
@@ -273,7 +281,8 @@ SCHEMAS = {
         "description": (
             "Read a report someone sent as a file instead of a voice note: Word (.docx), Excel (.xlsx), "
             "CSV, text or PDF. Returns its text. For photos (site diary, whiteboard, printed sheet) it "
-            "says to use vision_analyze. Use the saved path from the attachment note."),
+            "says to use vision_analyze. Use the saved path from the attachment note. Only files "
+            "people sent in the chat (Hermes's incoming media folders) can be read."),
         "parameters": {"type": "object", "properties": {"path": {"type": "string"}},
                        "required": ["path"]}}, "📎"),
     "steward_record_report": ({
