@@ -142,9 +142,10 @@ class CronSchedulingTests(SecurityBase):
         self.assertFalse(r["success"]); self.assertIn("allow_agent_scheduling", r["error"])
         self.assertEqual(self.cron.calls, [])
 
-    def test_settings_only_setup_still_works(self):
+    def test_settings_only_setup_refused_in_cron(self):
+        # a cron run is never the founder: even settings-only setup is refused by default
         r = self.call("steward_setup", departments=[{"name": "HR"}], schedule_jobs=False)
-        self.assertTrue(r["success"], r)
+        self.assertFalse(r["success"], r)
 
     def test_unreadable_config_fails_closed(self):
         def boom():
@@ -156,8 +157,9 @@ class CronSchedulingTests(SecurityBase):
         self.config = {"cron": {"allow_agent_scheduling": True}}
         r = self.call("steward_setup", departments=[{"name": "HR", "target": "whatsapp:9@g.us"}])
         self.assertTrue(r["success"], r)
+        # publishing always needs a person: never from a cron run, even with scheduling allowed
         r = self.call("steward_publish", confirm=True)
-        self.assertTrue(r["success"], r)
+        self.assertFalse(r["success"], r)
 
     def test_not_a_cron_session(self):
         self.env = {"HERMES_CRON_SESSION": ""}

@@ -284,9 +284,12 @@ class RecordAuthzTests(Base):
     def test_group_week_limited_to_this_and_last(self):
         wk = core.week_key(core.now_in(self.state()))
         self.in_group()
-        for w in (core.shift_week(wk, -2), core.shift_week(wk, 1), "2020-W01"):
+        for w in (core.shift_week(wk, -2), core.shift_week(wk, 1)):
             self.refused(self.call("steward_record_report", department="Site Operations", summary="x",
                                    done=["x"], week=w), "this week")
+        # far-off weeks are refused earlier, by the week range check
+        self.refused(self.call("steward_record_report", department="Site Operations", summary="x",
+                               done=["x"], week="2020-W01"))
         r = self.call("steward_record_report", department="Site Operations", summary="late",
                       done=["x"], week=core.shift_week(wk, -1))
         self.assertTrue(r["success"], r)
@@ -310,7 +313,7 @@ class RecordAuthzTests(Base):
         imgs.mkdir(parents=True)
         atts = []
         for i in range(15):
-            p = imgs / f"p{i:02d}.jpg"; p.write_bytes(b"\xff\xd8\xff")
+            p = imgs / f"p{i:02d}.jpg"; p.write_bytes(b"\xff\xd8\xff" + bytes([i]))  # distinct files (copies dedupe)
             atts.append({"path": str(p)})
         r = self.call("steward_record_report", department="Finance", summary="x", done=["x"],
                       attachments=atts)
