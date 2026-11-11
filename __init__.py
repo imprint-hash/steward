@@ -51,6 +51,95 @@ def _dispatch(name: str, args: dict) -> str:
     return _CTX.dispatch_tool(name, args)
 
 
+# ─── who is asking (publish / cron safety) ─────────────────────────────────────
+
+# Copied from gateway.session_context.NON_MESSAGING_SESSION_SURFACES (private): surfaces that are not
+# a human chat channel. Default-deny: anything else counts as a messaging chat.
+_LOCAL_SURFACES = frozenset({"", "api_server", "cli", "codex", "desktop", "gateway", "kanban", "local",
+                             "msgraph_webhook", "tool", "tui", "webhook"})
+_PRIVATE_CHAT_TYPES = frozenset({"dm", "private", "direct"})
+_GROUP_CHAT_TYPES = frozenset({"group", "supergroup", "channel", "forum", "guild", "thread"})
+_TRUTHY = frozenset({"1", "true", "yes", "on"})
+NOT_FOUNDER = "Only the founder can publish: reply send in the founder's private chat with Steward."
+
+
+def _get_session_env(name: str) -> str:
+    """Hermes' per-turn session value; "" when Hermes isn't importable (plain tests = local)."""
+    try:
+        from gateway.session_context import get_session_env
+    except Exception:
+        return ""
+    return str(get_session_env(name, "") or "")
+
+
+def _load_hermes_config() -> dict:
+    from hermes_cli.config import load_config
+    return load_config() or {}
+
+
+def _session_identity() -> dict:
+    keys = {"platform": "PLATFORM", "chat_id": "CHAT_ID", "user_id": "USER_ID",
+            "user_id_alt": "USER_ID_ALT", "chat_type": "CHAT_TYPE", "source": "SOURCE"}
+    return {k: _get_session_env(f"HERMES_SESSION_{v}").strip() for k, v in keys.items()}
+
+
+def _norm_id(value: str) -> str:
+    """Lower-case a chat/user id; for jids drop the device suffix ("234:12@s.whatsapp.net")."""
+    v = str(value or "").strip().lower()
+    if "@" in v:
+        user, domain = v.split("@", 1)
+        v = f"{user.split(':', 1)[0]}@{domain}"
+    return v
+
+
+def _same_id(a: str, b: str) -> bool:
+    a, b = _norm_id(a), _norm_id(b)
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    if ("@" in a) != ("@" in b):   # bare digits vs full jid
+        return a.split("@", 1)[0] == b.split("@", 1)[0]
+    return False
+
+
+def _require_founder(state: dict) -> None:
+    """Allow local sessions, or the founder in their own private chat; refuse everything else."""
+    s = _session_identity()
+    platform, source = s["platform"].lower(), s["source"].lower()
+    if platform in _LOCAL_SURFACES and source in _LOCAL_SURFACES:
+        return
+    founder = str(state.get("founder_target") or "").strip()
+    f_platform, _, f_id = founder.partition(":")
+    chat_type, chat_id = s["chat_type"].lower(), s["chat_id"]
+    if (not founder or not f_id or chat_type in _GROUP_CHAT_TYPES
+            or chat_id.lower().endswith("@g.us")):
+        raise ValueError(NOT_FOUNDER)
+    if f"{platform}:{chat_id}" == founder:
+        return
+    if (platform == f_platform.lower() and chat_type in _PRIVATE_CHAT_TYPES
+            and any(_same_id(f_id, x) for x in (chat_id, s["user_id"], s["user_id_alt"]))):
+        return
+    raise ValueError(NOT_FOUNDER)
+
+
+def _cron_scheduling_blocked() -> bool:
+    """Inside a cron run Hermes withholds its scheduler unless cron.allow_agent_scheduling is on."""
+    if _get_session_env("HERMES_CRON_SESSION").strip().lower() not in _TRUTHY:
+        return False
+    try:
+        allowed = (_load_hermes_config().get("cron") or {}).get("allow_agent_scheduling")
+    except Exception:
+        return True   # fail closed
+    return not (allowed is True or str(allowed).strip().lower() in _TRUTHY)
+
+
+def _require_cron_scheduling(what: str) -> None:
+    if _cron_scheduling_blocked():
+        raise ValueError(f"{what} needs Hermes' scheduler, which is off inside cron runs; turn on "
+                         "cron.allow_agent_scheduling in config.yaml or run it from a chat")
+
+
 def _guard(fn):
     def wrapper(args, **kw):
         try:
@@ -69,6 +158,8 @@ def _guard(fn):
 
 @_guard
 def setup(args, **kw):
+    if args.get("schedule_jobs", True):
+        _require_cron_scheduling("scheduling Steward's jobs (schedule_jobs=true)")
     path = _state_path()
     state = core.load_state(path)
     core.configure(state, args)
@@ -170,8 +261,10 @@ def publish(args, **kw):
     if not args.get("confirm"):
         raise ValueError("publishing needs the founder's approval: call again with confirm=true "
                          "only after the founder said send")
+    _require_cron_scheduling("publishing")
     path = _state_path()
     state = core.load_state(path)
+    _require_founder(state)
     if not state.get("all_staff_target"):
         raise ValueError("no all-staff group set; run steward_setup with all_staff_target first")
     key = args.get("week") or core.week_key(core.now_in(state))
