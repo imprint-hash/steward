@@ -649,7 +649,8 @@ def turn_context(state: dict, platform: str) -> str:
         "(department = the group name or chat id; set add_to_existing=true if they already sent part "
         "of it this week; pass photos/files in attachments), then reply briefly IN THE SENDER'S "
         "LANGUAGE reading back 2-3 key points. If the founder replies 'send' (in any language) to the "
-        "weekly pack, call steward_publish with confirm=true. Ignore unrelated chatter.]"
+        "weekly pack in the founder's private chat, call steward_publish with confirm=true; publishing "
+        "only works from the founder's private chat, never from a group. Ignore unrelated chatter.]"
     )
 
 

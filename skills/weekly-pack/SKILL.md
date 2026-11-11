@@ -27,5 +27,8 @@ description: Build and deliver Steward's weekly founder pack with a 60-second vo
 
 ## Rules
 - Never call `steward_publish` without the founder's approval in this conversation.
+- Publishing only works from the founder's private chat with Steward (or a local CLI session).
+  A "send" in a department or all-staff group, or from anyone else, is refused: tell them the
+  founder has to reply *send* in their private chat.
 - The staff version never includes blockers, who is late, or `founder_only` notes.
 - Don't add facts that aren't in the reports.
