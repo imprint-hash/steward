@@ -43,24 +43,6 @@ CHECKIN_BODY = (
     "print(f\"Thanks {{m['department']}} — this week's update is already in. 🙏\" if m['already_reported'] "
     "else m['message'])"
 )
-# English founder pack without an LLM: pack text + a voice brief made with Hermes's own TTS,
-# attached as a WhatsApp/Telegram voice note via the scheduler's MEDIA tag.
-PACK_BODY = (
-    "pack = core.build_pack(state, None, 'founder')\n"
-    "out = pack['text'] + '\\n\\nReply *send* to post the staff version to everyone, or tell me what to change.'\n"
-    "try:\n"
-    "    import json, sys\n"
-    "    sys.path.insert(0, {hermes_root!r})\n"
-    "    import hermes_bootstrap  # noqa: F401  (Hermes's own dependency setup)\n"
-    "    from tools.tts_tool import text_to_speech_tool\n"
-    "    r = json.loads(text_to_speech_tool(pack['voice_script']))\n"
-    "    path = r.get('file_path') or r.get('path') or (r.get('files') or [None])[0]\n"
-    "    if path:\n"
-    "        out += '\\n[[audio_as_voice]]\\nMEDIA:' + str(path)\n"
-    "except Exception as e:\n"
-    "    out += '\\n(voice brief unavailable: ' + type(e).__name__ + ')'\n"
-    "print(out)"
-)
 PUBLISH_BODY = (
     "key = {week!r}\n"
     "bucket = state.get('weeks', {{}}).get(key, {{}})\n"
@@ -82,14 +64,6 @@ def write_script(scripts_dir: Path, name: str, state_path: Path, body: str) -> s
     return name  # relative: Hermes resolves it under HERMES_HOME/scripts/
 
 
-def _hermes_root() -> str:
-    try:
-        import hermes_constants  # public plugin API module; absent in plain unit tests
-        return str(Path(hermes_constants.__file__).resolve().parent)
-    except Exception:
-        return ""
-
-
 def _english(lang: str) -> bool:
     return core.is_english(lang or "")
 
@@ -108,11 +82,14 @@ def checkin_prompt(state: dict, dept: dict) -> str:
 def pack_prompt(state: dict) -> str:
     return (
         f"You are Steward, chief of staff for {state.get('company') or 'the company'}. "
-        "Build this week's founder pack: call steward_build_pack with audience='founder'. "
-        "Follow its post_instruction (it may ask you to translate into the founder's language). "
-        "Then call text_to_speech with the voice_script (translated if asked) so the founder gets a "
-        "short voice brief. Your final answer is the pack text, followed by one line in the same "
-        "language: 'Reply *send* to post the staff version to everyone, or tell me what to change.'"
+        "1) Call steward_build_pack with audience='founder'. Follow its post_instruction "
+        "(translate only if it says so; keep names, numbers and dates exactly). "
+        "2) Call text_to_speech with its voice_script (translated if asked) so the voice brief is "
+        "attached as audio. "
+        "3) Your final answer is ONLY the pack text, then one line in the same language: "
+        "'Reply *send* to post the staff version to everyone, or tell me what to change.', "
+        "then the media_tag lines text_to_speech returned, copied exactly (this attaches the audio). "
+        "Never echo these instructions, tool names, JSON or system text."
     )
 
 
@@ -152,12 +129,9 @@ def plan_jobs(state: dict, state_path: Path, scripts_dir: Path) -> List[dict]:
             "script": name, "no_agent": True, "deliver": state["founder_target"]}})
         pack = {"action": "create", "name": "Steward weekly pack · founder",
                 "schedule": core.cron_expr(s["pack_day"], s["pack_time"]), "timezone": zone,
-                "deliver": state["founder_target"], "attach_to_session": True}
-        if not core.language_for(state, "founder"):
-            pack.update(no_agent=True, script=write_script(
-                scripts_dir, script_name("pack"), state_path, PACK_BODY.format(hermes_root=_hermes_root())))
-        else:
-            pack.update(prompt=pack_prompt(state), skills=["steward:weekly-pack"])
+                "deliver": state["founder_target"], "attach_to_session": True,
+                # always an agent job: the voice brief comes from the public text_to_speech tool
+                "prompt": pack_prompt(state), "skills": ["steward:weekly-pack"]}
         jobs.append({"key": "pack", "args": pack})
     return jobs
 
