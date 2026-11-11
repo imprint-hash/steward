@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 from pathlib import Path
 
@@ -61,14 +62,25 @@ def _dispatch(name: str, args: dict) -> str:
 
 # ─── who is asking (publish / cron safety) ─────────────────────────────────────
 
-# Copied from gateway.session_context.NON_MESSAGING_SESSION_SURFACES (private): surfaces that are not
-# a human chat channel. Default-deny: anything else counts as a messaging chat.
-_LOCAL_SURFACES = frozenset({"", "api_server", "cli", "codex", "desktop", "gateway", "kanban", "local",
-                             "msgraph_webhook", "tool", "tui", "webhook"})
+# The trusted operator is a person at this machine: CLI, TUI, desktop app or the gateway's LOCAL platform.
+# Webhooks, the API server, Microsoft Graph webhooks and cron runs are NOT the operator. An empty
+# platform and source (plain unit tests, Hermes not importable) counts as local only outside cron.
+_OPERATOR_SURFACES = frozenset({"", "cli", "tui", "desktop", "local"})
 _PRIVATE_CHAT_TYPES = frozenset({"dm", "private", "direct"})
 _GROUP_CHAT_TYPES = frozenset({"group", "supergroup", "channel", "forum", "guild", "thread"})
 _TRUTHY = frozenset({"1", "true", "yes", "on"})
 NOT_FOUNDER = "Only the founder can publish: reply send in the founder's private chat with Steward."
+NOT_FOUNDER_SETUP = ("Only the founder can change Steward's setup: do it in the founder's private chat "
+                     "with Steward or on the computer running Hermes.")
+NOT_FOUNDER_PACK = ("The founder pack, past weeks and status are only for the founder: ask in the "
+                    "founder's private chat with Steward. Anyone can see the staff version.")
+FOUNDER_TARGET_LOCAL_ONLY = ("The founder chat can only be set or changed on the computer running Hermes "
+                             "(hermes CLI or desktop app), not from a chat.")
+_BAD_TARGET_PLATFORMS = frozenset({"all", "local", "origin", "room"})
+_TARGET_RE = re.compile(r"[a-z_]+:[^,\s]+")
+MAX_ATTACHMENTS = 10
+MAX_PUBLISH_CHARS = 6000
+_URL_RE = re.compile(r"(?:https?://|www\.)[^\s<>()\[\]\"'*_`]+", re.IGNORECASE)
 
 
 def _get_session_env(name: str) -> str:
@@ -111,29 +123,114 @@ def _same_id(a: str, b: str) -> bool:
     return False
 
 
-def _require_founder(state: dict) -> None:
-    """Allow local sessions, or the founder in their own private chat; refuse everything else."""
+def _in_cron() -> bool:
+    return _get_session_env("HERMES_CRON_SESSION").strip().lower() in _TRUTHY
+
+
+def _is_operator() -> bool:
+    """A person at the machine running Hermes (CLI, TUI, desktop, LOCAL). Never a cron run."""
+    if _in_cron():
+        return False
     s = _session_identity()
-    platform, source = s["platform"].lower(), s["source"].lower()
-    if platform in _LOCAL_SURFACES and source in _LOCAL_SURFACES:
+    return s["platform"].lower() in _OPERATOR_SURFACES and s["source"].lower() in _OPERATOR_SURFACES
+
+
+def _in_group(s: dict) -> bool:
+    return s["chat_type"].lower() in _GROUP_CHAT_TYPES or s["chat_id"].lower().endswith("@g.us")
+
+
+def _require_founder(state: dict, msg: str = NOT_FOUNDER) -> None:
+    """Allow the local operator, or the founder in their own private chat; refuse everything else
+    (groups, other people's chats, webhooks, the API server and every cron run)."""
+    if _is_operator():
         return
+    if _in_cron():
+        raise ValueError(msg)
+    s = _session_identity()
+    platform = s["platform"].lower()
     founder = str(state.get("founder_target") or "").strip()
     f_platform, _, f_id = founder.partition(":")
     chat_type, chat_id = s["chat_type"].lower(), s["chat_id"]
-    if (not founder or not f_id or chat_type in _GROUP_CHAT_TYPES
-            or chat_id.lower().endswith("@g.us")):
-        raise ValueError(NOT_FOUNDER)
+    if not founder or not f_id or _in_group(s):
+        raise ValueError(msg)
     if f"{platform}:{chat_id}" == founder:
         return
     if (platform == f_platform.lower() and chat_type in _PRIVATE_CHAT_TYPES
             and any(_same_id(f_id, x) for x in (chat_id, s["user_id"], s["user_id_alt"]))):
         return
-    raise ValueError(NOT_FOUNDER)
+    raise ValueError(msg)
+
+
+def _is_founder(state: dict) -> bool:
+    try:
+        _require_founder(state)
+        return True
+    except ValueError:
+        return False
+
+
+def _target_is_this_chat(target: str, s: dict) -> bool:
+    """Does a 'platform:chat_id[:thread]' target point at the chat this turn came from?"""
+    t_platform, _, rest = str(target or "").strip().partition(":")
+    if not rest or t_platform.lower() != s["platform"].lower():
+        return False
+    ids = {rest}
+    if ":" in rest and "@" not in rest:   # telegram:-100123:45 -> chat -100123, thread 45
+        ids.add(rest.split(":", 1)[0])
+    return any(_same_id(i, s["chat_id"]) for i in ids)
+
+
+def _chat_dept(state: dict, s: dict):
+    """The department whose group this turn came from, or None."""
+    for d in state.get("departments") or []:
+        if d.get("target") and _target_is_this_chat(d["target"], s):
+            return d
+    return None
+
+
+def _cron_job_id() -> str:
+    """Id of the Hermes cron job running right now ("" outside cron). Set by Hermes, not the model."""
+    try:
+        if _CTX is not None and hasattr(_CTX, "current_cron_execution"):
+            ex = _CTX.current_cron_execution()
+        else:
+            from cron.execution_identity import current_cron_execution
+            ex = current_cron_execution()
+    except Exception:
+        return ""
+    return str(getattr(ex, "job_id", "") or "")
+
+
+def _is_steward_pack_job(state: dict) -> bool:
+    """True inside Steward's own weekly-pack cron job, which delivers only to the founder chat."""
+    if not _in_cron():
+        return False
+    job = str((state.get("jobs") or {}).get("pack") or "")
+    return bool(job) and _cron_job_id() == job
+
+
+def _check_target(field: str, value) -> str:
+    """A delivery target must be one concrete chat: 'platform:chat_id' (optionally ':thread')."""
+    raw = str(value or "")
+    v = raw.strip()
+    platform = v.split(":", 1)[0]
+    if (not _TARGET_RE.fullmatch(v) or not v.isprintable() or any(c in raw for c in "\r\n\t\v\f")
+            or platform in _BAD_TARGET_PLATFORMS or platform.startswith("bot-chat")):
+        raise ValueError(f"{field} must be one chat like 'whatsapp:120363...@g.us' or "
+                         f"'telegram:-100123' (no commas, spaces, 'all', 'local' or 'origin'); got {v!r}")
+    return v
+
+
+def _check_encodable(obj, what: str) -> None:
+    try:
+        json.dumps(obj, ensure_ascii=False).encode("utf-8")
+    except (UnicodeError, TypeError, ValueError):
+        raise ValueError(f"{what} contains characters that can't be saved; retype it and try again")
 
 
 def _cron_scheduling_blocked() -> bool:
     """Inside a cron run Hermes withholds its scheduler unless cron.allow_agent_scheduling is on."""
-    if _get_session_env("HERMES_CRON_SESSION").strip().lower() not in _TRUTHY:
+    if not _in_cron():
         return False
     try:
         allowed = (_load_hermes_config().get("cron") or {}).get("allow_agent_scheduling")
@@ -164,20 +261,65 @@ def _guard(fn):
 
 # ─── tool handlers ─────────────────────────────────────────────────────────────
 
+def _authorize_setup(state: dict, args: dict) -> None:
+    """Who may change Steward's settings.
+
+    * local operator: anything, including the first setup and the founder chat
+    * the founder in their private chat (or a cron run with cron.allow_agent_scheduling on):
+      everything except the founder chat, and only once a founder chat exists
+    * anyone else (group members, other DMs, webhooks, API server): nothing
+    """
+    if _is_operator():
+        return
+    founder = str(state.get("founder_target") or "").strip()
+    if not founder:
+        raise ValueError("First-time setup has to be done on the computer running Hermes "
+                         "(hermes CLI or desktop app), where the founder chat is set.")
+    if not _in_cron():   # a cron run got here only because cron.allow_agent_scheduling is on
+        _require_founder(state, NOT_FOUNDER_SETUP)
+    new = args.get("founder_target")
+    if new is not None and str(new).strip() and str(new).strip() != founder:
+        raise ValueError(FOUNDER_TARGET_LOCAL_ONLY)
+
+
+def _validate_setup_targets(args: dict) -> None:
+    for k in ("founder_target", "all_staff_target"):
+        if args.get(k):
+            _check_target(k, args[k])
+    depts = args.get("departments")
+    if depts is not None:
+        if not isinstance(depts, list):
+            raise ValueError("departments must be a list")
+        for d in depts:
+            if isinstance(d, dict) and str(d.get("target") or "").strip():
+                _check_target(f"target for {str(d.get('name') or '?')[:40]!r}", d["target"])
+
+
 @_guard
 def setup(args, **kw):
-    if args.get("schedule_jobs", True):
-        _require_cron_scheduling("scheduling Steward's jobs (schedule_jobs=true)")
+    schedule = args.get("schedule_jobs", True)
+    if _cron_scheduling_blocked():
+        raise ValueError("Steward's setup can't be changed inside a cron run unless "
+                         "cron.allow_agent_scheduling is on in config.yaml; change it from the "
+                         "founder's private chat or the Hermes CLI")
+    _check_encodable(args, "the setup")
     path = _state_path()
     state = core.load_state(path)
+    _authorize_setup(state, args)
+    _validate_setup_targets(args)
     core.configure(state, args)
     if not state["departments"]:
         raise ValueError("add at least one department, e.g. {name: 'Site Operations', "
                          "lead: 'Tunde', target: 'whatsapp:1203630...@g.us'}")
+    _check_encodable(state, "the setup")
     jobs = None
-    if args.get("schedule_jobs", True):
-        jobs = scheduler.apply_jobs(state, path, _scripts_dir(), _dispatch)
+    if schedule:
+        # dry run first: any bad value fails here, before a single old job is removed
+        _check_encodable(scheduler.plan_jobs(state, path, _scripts_dir()), "the schedule")
     core.save_state(path, state)
+    if schedule:
+        jobs = scheduler.apply_jobs(state, path, _scripts_dir(), _dispatch)
+        core.save_state(path, state)
     no_target = [d["name"] for d in state["departments"] if not d.get("target")]
     notes = []
     if no_target:
@@ -198,6 +340,12 @@ def setup(args, **kw):
 @_guard
 def checkin(args, **kw):
     state = core.load_state(_state_path())
+    s = _session_identity()
+    if not _in_cron() and _in_group(s) and not _is_founder(state):
+        here, asked = _chat_dept(state, s), core.find_dept(state, args.get("department", ""))
+        if not here or here["id"] != asked["id"]:
+            raise ValueError("In a group, Steward only shows the check-in for that group's own department"
+                             + (f" ({here['name']})." if here else "."))
     return _ok(**core.checkin_message(state, args.get("department", "")))
 
 
@@ -214,8 +362,25 @@ def record(args, **kw):
     state = core.load_state(path)
     week = _week_arg(args, state)
     dept = core.find_dept(state, args.get("department", ""))
+    if not _is_founder(state):
+        # a group member may only file their own department's update, for this week or last week
+        s = _session_identity()
+        here = _chat_dept(state, s)
+        if not here:
+            raise ValueError("Department updates can only be saved from that department's own group "
+                             "(or by the founder).")
+        if here["id"] != dept["id"]:
+            raise ValueError(f"This is the {here['name']} group: it can only save the {here['name']} "
+                             f"update, not {dept['name']}'s. {dept['name']} sends theirs in their own group.")
+        this_week = core.week_key(core.now_in(state))
+        if week not in (this_week, core.shift_week(this_week, -1)):
+            raise ValueError(f"From a group, updates can only be saved for this week ({this_week}) or "
+                             "last week; older or future weeks are for the founder.")
+    raw = args.get("attachments") or []
+    if not isinstance(raw, list):
+        raise ValueError("attachments must be a list")
     kept = []
-    for a in args.get("attachments") or []:
+    for a in raw[:MAX_ATTACHMENTS]:
         if isinstance(a, str):
             a = {"path": a}
         src = a.get("path")
@@ -252,6 +417,7 @@ def record(args, **kw):
 @_guard
 def status(args, **kw):
     state = core.load_state(_state_path())
+    _require_founder(state, NOT_FOUNDER_PACK)
     key = core.week_key(core.now_in(state))
     return _ok(week=key, text=core.status_text(state),
                missing=[d["name"] for d in core.missing(state, key)])
@@ -260,7 +426,14 @@ def status(args, **kw):
 @_guard
 def build_pack(args, **kw):
     state = core.load_state(_state_path())
-    pack = core.build_pack(state, _week_arg(args, state), args.get("audience", "founder"))
+    audience = args.get("audience", "founder")
+    explicit_week = args.get("week") is not None
+    if audience != "staff" or explicit_week:
+        # Steward's own weekly-pack cron job may build this week's founder pack: it only
+        # ever delivers to the founder chat, which only the local operator can set.
+        if not (audience == "founder" and not explicit_week and _is_steward_pack_job(state)):
+            _require_founder(state, NOT_FOUNDER_PACK)
+    pack = core.build_pack(state, _week_arg(args, state), audience)
     return _ok(**pack)
 
 
@@ -269,7 +442,10 @@ def publish(args, **kw):
     if not args.get("confirm"):
         raise ValueError("publishing needs the founder's approval: call again with confirm=true "
                          "only after the founder said send")
-    _require_cron_scheduling("publishing")
+    if _in_cron():
+        raise ValueError("Publishing never runs inside a cron run, even with "
+                         "cron.allow_agent_scheduling on: the founder has to reply send in their "
+                         "private chat with Steward.")
     path = _state_path()
     state = core.load_state(path)
     _require_founder(state)
@@ -287,7 +463,17 @@ def publish(args, **kw):
             raise ValueError(f"all staff read {pack['language']}: call steward_build_pack with "
                              "audience='staff', translate its text as post_instruction says, and pass "
                              "it here as text")
-    bucket["published_text"] = text[:6000]
+        foreign = sorted({u.rstrip(".,;:!?") for u in _URL_RE.findall(text)}
+                         - {u.rstrip(".,;:!?") for u in _URL_RE.findall(pack["text"])})
+        if foreign:
+            raise ValueError("the translated text has links that aren't in the staff pack: "
+                             f"{', '.join(foreign[:3])}. Translate the pack only; add nothing.")
+        if len(text) > MAX_PUBLISH_CHARS:
+            raise ValueError(f"the staff text is {len(text)} characters; keep it under "
+                             f"{MAX_PUBLISH_CHARS} (translate the pack only, add nothing)")
+    text = text[:MAX_PUBLISH_CHARS]
+    _check_encodable(text, "the staff text")
+    bucket["published_text"] = text
     core.save_state(path, state)
     r = scheduler.publish_job(state, key, path, _scripts_dir(), _dispatch)
     if not r.get("success"):
@@ -295,7 +481,8 @@ def publish(args, **kw):
     bucket["sent"] = core.now_in(state).isoformat(timespec="minutes")
     core.save_state(path, state)
     return _ok(week=key, to=state["all_staff_target"], job_id=r.get("job_id"),
-               note="Posting to the all-staff group within a minute.", preview=text)
+               note="Posting to the all-staff group within a minute. This is exactly what will be "
+                    "posted: show it to the founder.", preview=text, posted_text=text)
 
 
 # ─── slash command ─────────────────────────────────────────────────────────────

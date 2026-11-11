@@ -30,6 +30,14 @@ The same steps apply for every founder language, English included.
 - **"chase X"**: post a polite reminder for that department using `steward_checkin`.
 
 ## Rules
+- The founder pack, past weeks and `steward_status` are founder-only: they work in the founder's
+  private chat, a local CLI session and Steward's own weekly-pack job. In a group, only the staff
+  pack for this week (`audience: "staff"`) is available; never paste the founder pack there.
+- `steward_setup` is founder-only too (the founder's private chat or the computer running
+  Hermes); the founder chat itself can only be changed on that computer.
+- Publishing never runs from a scheduled (cron) run: the founder must reply *send* in person.
+  When you pass a translated `text`, translate the staff pack only (under 6000 characters, no
+  new links). The result's `posted_text` is exactly what goes out; show it to the founder.
 - Never call `steward_publish` without the founder's approval in this conversation.
 - Publishing only works from the founder's private chat with Steward (or a local CLI session).
   A "send" in a department or all-staff group, or from anyone else, is refused: tell them the
