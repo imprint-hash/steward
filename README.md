@@ -228,12 +228,12 @@ otherwise Steward reads scanned PDFs with vision instead.
 - **Files:** settings and reports in `HERMES_HOME/steward/state.json` (mode 600). Copies of photos and files
   sent in as reports go in `HERMES_HOME/steward/files/<week>/<department>/`.
 - **Scripts:** writes small helper scripts named `steward_*.py` into `HERMES_HOME/scripts/` for the no-LLM
-  cron jobs (check-ins, nudges, status, founder pack, publish). Re-running setup rewrites them, and they
-  are safe to delete.
+  cron jobs (English check-ins, nudges, status, publish). They only load Steward's own `core.py` and
+  never import Hermes internals. Re-running setup rewrites them, and they are safe to delete.
 - **Cron jobs:** creates and removes its own jobs through Hermes's `cronjob_manage`, and only the jobs it
   recorded in its state.
-- **Hermes internals:** the English founder-pack script calls Hermes's own `text_to_speech` tool to make
-  the voice brief, and runs inside Hermes's runtime.
+- **Founder pack:** always an agent job (skill `steward:weekly-pack`) that calls Hermes's public
+  `text_to_speech` tool for the voice brief, in every language. No generated script imports Hermes internals.
 - **Not done:** no third-party network calls of its own, no shell commands, no stored credentials, no
   telemetry, no self-updating. Messages go out only through Hermes's gateway, and nothing is posted to
   all staff without the founder's approval in the conversation.

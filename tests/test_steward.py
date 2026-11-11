@@ -323,6 +323,11 @@ class SchedulerTests(unittest.TestCase):
         nudge = next(a for a in creates if a["name"].startswith("Steward nudge · Safety"))
         self.assertTrue(nudge["no_agent"]); self.assertTrue((self.tmp / "scripts" / nudge["script"]).exists())
         self.assertFalse(any("Finance" in a["name"] for a in creates))  # no group set
+        pack = next(a for a in creates if a["name"] == "Steward weekly pack · founder")
+        self.assertNotIn("no_agent", pack)  # English founder too: agent job with the public TTS tool
+        self.assertEqual(pack["skills"], ["steward:weekly-pack"])
+        self.assertIn("steward_build_pack", pack["prompt"]); self.assertIn("text_to_speech", pack["prompt"])
+        self.assertTrue(pack["attach_to_session"]); self.assertEqual(pack["deliver"], s["founder_target"])
         out2 = scheduler.apply_jobs(s, self.state_path, self.tmp / "scripts", cron)
         self.assertEqual(len(out2["removed"]), 8)
         self.assertEqual(set(s["jobs"].values()), {f"job{i}" for i in range(9, 17)})
@@ -336,17 +341,21 @@ class SchedulerTests(unittest.TestCase):
         self.assertIn("translate", creates["Steward check-in · Procurement"]["prompt"])
         self.assertNotIn("no_agent", creates["Steward check-in · Procurement"])
         self.assertIn("steward_build_pack", creates["Steward weekly pack · founder"]["prompt"])
+        self.assertNotIn("no_agent", creates["Steward weekly pack · founder"])
+        self.assertEqual(creates["Steward weekly pack · founder"]["skills"], ["steward:weekly-pack"])
 
-    def test_checkin_and_pack_scripts_run_standalone(self):
+    def test_checkin_script_runs_standalone_and_no_script_imports_hermes(self):
         import subprocess
         s = three_weeks(); core.save_state(self.state_path, s)
         scheduler.apply_jobs(s, self.state_path, self.tmp / "scripts", FakeCron())
         out = subprocess.run([sys.executable, str(self.tmp / "scripts" / scheduler.script_name("checkin", "safety"))],
                              capture_output=True, text=True, timeout=30)
         self.assertEqual(out.returncode, 0, out.stderr); self.assertIn("Musa", out.stdout)
-        out = subprocess.run([sys.executable, str(self.tmp / "scripts" / scheduler.script_name("pack"))],
-                             capture_output=True, text=True, timeout=60)
-        self.assertEqual(out.returncode, 0, out.stderr); self.assertIn("Reply *send*", out.stdout)
+        self.assertFalse((self.tmp / "scripts" / scheduler.script_name("pack")).exists())
+        for script in (self.tmp / "scripts").glob("*.py"):
+            src = script.read_text(encoding="utf-8")
+            for banned in ("sys.path", "hermes_bootstrap", "tools.tts_tool"):
+                self.assertNotIn(banned, src, script.name)
 
     def test_nudge_script_runs_standalone(self):
         import subprocess
